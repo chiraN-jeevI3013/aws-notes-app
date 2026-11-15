@@ -1,0 +1,21 @@
+# --- Secrets: never commit ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Personal / account-specific (repo is public) ---
+CLAUDE.md
+Temp/
+AWS-Docs/
+
+# --- Build output (rebuildable, so don't store it) ---
+/bin/
+/dist/
+*.zip
+bootstrap
+
+# --- OS / editor junk ---
+.DS_Store
+.vscode/
+.idea/

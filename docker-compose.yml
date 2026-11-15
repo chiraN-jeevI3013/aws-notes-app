@@ -1,0 +1,43 @@
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  # Fake AWS (we only use S3) for local photo uploads. Real S3 in Phase 5.
+  localstack:
+    image: localstack/localstack:latest
+    environment:
+      - SERVICES=s3
+      # LocalStack skips presigned-URL signature checks by default. Turn them on, like real S3.
+      - S3_SKIP_SIGNATURE_VALIDATION=0
+      # Read from your shell or a local .env file. Never commit the token.
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
+    ports:
+      - "4566:4566"
+    volumes:
+      # Scripts in ready.d run when LocalStack is ready: recreates the bucket on every start.
+      - ./infra/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+
+  # Our Go API, built from the Dockerfile in this folder.
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Inside Docker, "localhost" is the container itself. Other containers are
+      # reached by their service name on the compose network (Docker's built-in DNS).
+      - DYNAMODB_ENDPOINT=http://dynamodb:8000
+      - S3_ENDPOINT=http://localstack:4566
+      # Presigned URLs are opened by your browser/curl on the Mac, so sign them for localhost.
+      - S3_PUBLIC_ENDPOINT=http://localhost:4566
+      # CORS: only the frontend's origin may read API responses in a browser (instead of "*").
+      - ALLOWED_ORIGIN=http://localhost:5500
+      # - ALLOWED_ORIGIN=http://example.com
+    depends_on:
+      dynamodb:
+        condition: service_started
+      localstack:
+        condition: service_healthy   # wait for LocalStack's healthcheck to pass
+    restart: on-failure              # if DynamoDB Local isn't accepting connections yet, retry

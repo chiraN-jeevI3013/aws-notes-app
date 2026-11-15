@@ -1,0 +1,7 @@
+# Files Docker should NOT send into the build (keeps the build fast and secrets out of images).
+.env
+.git
+Temp/
+Study-Notes-Interview/
+AWS-Docs/
+*.md

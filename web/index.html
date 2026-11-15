@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d1f23; --muted: #6b7280;
+    --border: #e3e5e8; --accent: #2563eb; --accent-text: #ffffff; --danger: #dc2626; --hover: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316; --panel: #1a1d21; --text: #e6e8eb; --muted: #9aa1ab;
+      --border: #2a2e34; --accent: #3b82f6; --accent-text: #ffffff; --danger: #f87171; --hover: #222833;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 77px); }
+  @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } }
+  aside { border-right: 1px solid var(--border); padding: 16px; background: var(--panel); }
+  main { padding: 16px 24px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+  form.inline { display: flex; gap: 6px; margin-bottom: 12px; }
+  input[type=text], textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  textarea { min-height: 120px; resize: vertical; }
+  button { padding: 8px 12px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-text); font: inherit; cursor: pointer; white-space: nowrap; }
+  button.ghost { background: transparent; color: var(--muted); padding: 4px 8px; }
+  button.ghost:hover { color: var(--danger); }
+  ul.folders { list-style: none; margin: 0; padding: 0; }
+  ul.folders li { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+  ul.folders li:hover { background: var(--hover); }
+  ul.folders li.active { background: var(--hover); font-weight: 600; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .error { color: var(--danger); font-size: 13px; min-height: 1.2em; }
+  .note { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .note .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .thumbs img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Welcome to Notes</h1>
+  <p>Folders, notes and photos: Go API + DynamoDB + S3</p>
+</header>
+
+<div class="layout">
+  <aside>
+    <h2>Folders</h2>
+    <form class="inline" id="folder-form">
+      <input type="text" id="folder-name" placeholder="New folder name" maxlength="100" required>
+      <button type="submit">Add</button>
+    </form>
+    <div class="error" id="folder-error"></div>
+    <ul class="folders" id="folder-list"></ul>
+  </aside>
+
+  <main id="main">
+    <p class="empty">Select or create a folder.</p>
+  </main>
+</div>
+
+<script>
+// The only line that changes between local and AWS (Phase 5: API Gateway URL).
+const API_URL = "http://localhost:8080";
+
+let folders = [];
+let currentFolderId = null;
+
+// api() wraps fetch: sends JSON, parses JSON, and turns non-2xx into an Error with the API's message.
+async function api(method, path, body) {
+  const res = await fetch(API_URL + path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+// el() builds DOM nodes. Text goes in via textContent (never innerHTML), so user input can't inject HTML/JS (XSS).
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+// ---------- Folders ----------
+async function loadFolders() {
+  const errBox = document.getElementById("folder-error");
+  try {
+    folders = await api("GET", "/folders");
+    errBox.textContent = "";
+  } catch (e) {
+    errBox.textContent = "Can't reach the API: " + e.message;
+    folders = [];
+  }
+  folders.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  renderFolders();
+}
+
+function renderFolders() {
+  const list = document.getElementById("folder-list");
+  list.replaceChildren();
+  if (folders.length === 0) list.append(el("li", { className: "empty", textContent: "No folders yet." }));
+  for (const f of folders) {
+    const del = el("button", { className: "ghost", textContent: "✕", title: "Delete folder" });
+    del.onclick = async (ev) => {
+      ev.stopPropagation(); // don't also "select" the folder
+      if (!confirm(`Delete "${f.name}" and all its notes and photos?`)) return;
+      await api("DELETE", `/folders/${f.id}`);
+      if (currentFolderId === f.id) selectFolder(null);
+      loadFolders();
+    };
+    const li = el("li", { className: f.id === currentFolderId ? "active" : "" }, el("span", { textContent: f.name }), del);
+    li.onclick = () => selectFolder(f.id);
+    list.append(li);
+  }
+}
+
+document.getElementById("folder-form").onsubmit = async (ev) => {
+  ev.preventDefault(); // stop the browser's default full-page form submit
+  const input = document.getElementById("folder-name");
+  try {
+    const f = await api("POST", "/folders", { name: input.value });
+    input.value = "";
+    await loadFolders();
+    selectFolder(f.id);
+  } catch (e) {
+    document.getElementById("folder-error").textContent = e.message;
+  }
+};
+
+function selectFolder(id) {
+  currentFolderId = id;
+  renderFolders();
+  if (!id) {
+    document.getElementById("main").replaceChildren(el("p", { className: "empty", textContent: "Select or create a folder." }));
+    return;
+  }
+  loadNotes();
+}
+
+// ---------- Notes ----------
+async function loadNotes() {
+  const main = document.getElementById("main");
+  const folder = folders.find((x) => x.id === currentFolderId);
+  let notes = [];
+  const errBox = el("div", { className: "error" });
+  try {
+    notes = await api("GET", `/folders/${currentFolderId}/notes`);
+  } catch (e) {
+    errBox.textContent = e.message;
+  }
+  notes.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest first
+
+  // "New note" form at the top.
+  const title = el("input", { type: "text", placeholder: "Note title", maxLength: 200, required: true });
+  const text = el("textarea", { placeholder: "Write something..." });
+  const form = el("form", { className: "note" }, title, text, el("div", { className: "row" }, el("button", { type: "submit", textContent: "Add note" })));
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    try {
+      await api("POST", `/folders/${currentFolderId}/notes`, { title: title.value, text: text.value });
+      loadNotes();
+    } catch (e) {
+      errBox.textContent = e.message;
+    }
+  };
+
+  main.replaceChildren(
+    el("h2", { textContent: folder ? folder.name : "Notes" }),
+    form,
+    errBox,
+    ...(notes.length ? notes.map(renderNote) : [el("p", { className: "empty", textContent: "No notes in this folder yet." })]),
+  );
+}
+
+// One note card: editable title + text, Save and Delete. (Photos: piece 3.)
+function renderNote(n) {
+  const base = `/folders/${currentFolderId}/notes/${n.id}`;
+  const title = el("input", { type: "text", value: n.title, maxLength: 200 });
+  const text = el("textarea", { value: n.text });
+  const status = el("span", { className: "empty" });
+
+  const save = el("button", { textContent: "Save" });
+  save.onclick = async () => {
+    try {
+      await api("PUT", base, { title: title.value, text: text.value });
+      status.textContent = "Saved ✓";
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+  // Show "Unsaved changes" as soon as the user types.
+  title.oninput = text.oninput = () => (status.textContent = "Unsaved changes");
+
+  const del = el("button", { className: "ghost", textContent: "Delete note" });
+  del.onclick = async () => {
+    if (!confirm(`Delete "${n.title}"?`)) return;
+    await api("DELETE", base);
+    loadNotes();
+  };
+
+  // Photos: thumbnails from presigned GET URLs (valid 1 hour). Click opens full size.
+  const thumbs = el("div", { className: "thumbs" });
+  for (const p of n.photos || []) {
+    const img = el("img", { src: p.url, alt: "photo", loading: "lazy", title: "Open full size" });
+    img.onclick = () => window.open(p.url, "_blank");
+    // A key in DynamoDB whose file is gone from S3 (a "dangling reference") → hide the broken image.
+    img.onerror = () => img.replaceWith(el("span", { className: "empty", textContent: "[missing photo]" }));
+    thumbs.append(img);
+  }
+
+  // Upload: the same 3 steps you ran by hand with curl in Phase 2.
+  const picker = el("input", { type: "file", accept: "image/jpeg,image/png,image/webp", hidden: true });
+  const addPhoto = el("button", { className: "ghost", textContent: "+ Photo" });
+  addPhoto.onclick = () => picker.click();
+  picker.onchange = async () => {
+    const file = picker.files[0];
+    if (!file) return;
+    try {
+      status.textContent = "Uploading...";
+      // 1. Ask our API for a presigned PUT URL (signed for this exact type + size).
+      const { uploadUrl, key } = await api("POST", `${base}/photo-url`, { contentType: file.type, size: file.size });
+      // 2. PUT the bytes straight to S3. Our API is not involved; S3 checks the signature.
+      const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!put.ok) throw new Error(`S3 upload failed: HTTP ${put.status}`);
+      // 3. Tell our API it's done; it verifies the object exists, then saves the key on the note.
+      await api("POST", `${base}/photos`, { key });
+      loadNotes();
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+
+  return el("div", { className: "note" }, title, el("div", { style: "height:8px" }), text, thumbs,
+    el("div", { className: "row" }, save, addPhoto, picker, del, status));
+}
+
+loadFolders();
+</script>
+</body>
+</html>
