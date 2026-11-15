@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "NotesTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-2:ACCOUNT_ID:table/notes-app"
+    },
+    {
+      "Sid": "PhotoObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::PHOTO_BUCKET/notes/*"
+    },
+    {
+      "Sid": "PhotoBucketList",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::PHOTO_BUCKET"
+    },
+    {
+      "Sid": "OwnLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": [
+        "arn:aws:logs:us-east-2:ACCOUNT_ID:log-group:/aws/lambda/notes-app-api",
+        "arn:aws:logs:us-east-2:ACCOUNT_ID:log-group:/aws/lambda/notes-app-api:*"
+      ]
+    }
+  ]
+}

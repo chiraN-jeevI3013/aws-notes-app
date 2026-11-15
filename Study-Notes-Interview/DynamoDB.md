@@ -87,3 +87,25 @@ What the screenshot shows:
 - "Hot partitions happen when one PK gets too much traffic. Spread load with high-cardinality keys."
 - "Pagination: Query returns at most 1 MB per page. You continue with `LastEvaluatedKey` → `ExclusiveStartKey`."
 - "Need another access pattern? Add a GSI (a global secondary index with a different PK/SK)."
+
+## Race conditions: preventing double booking (conditional writes)
+**Scenario:** two people both see "10:30 free" and both click Book at the same moment.
+- Requests are **not** in a neat queue. They run **in parallel** on different Lambdas.
+- **Naive code (BROKEN):**
+  1. Lambda A reads the slot → free.
+  2. Lambda B reads the slot → free.
+  3. A writes "booked by A".
+  4. B writes "booked by B" (`PutItem` is an upsert → **silently overwrites A**).
+  Both get "Success!" → double booking. This is a **race condition** (check-then-act).
+- **Fix: make the check and the write ONE atomic operation inside the database:**
+```
+PutItem  PK=DOCTOR#rao#2026-11-17  SK=SLOT#10:30  patient=A
+  ConditionExpression: attribute_not_exists(PK)     ← "only if nobody has booked it"
+```
+  - The first write wins. The second gets **`ConditionalCheckFailedException`** → API returns **409 Conflict**: "slot just got taken, pick another".
+  - DynamoDB guarantees the condition check and write happen atomically per item, even with 1000 concurrent Lambdas.
+- Related tools:
+  - **Optimistic locking:** store a `version` number, and update only `IF version = :seen`, then increment it. Good for "edit a record" conflicts.
+  - **`TransactWriteItems`:** all-or-nothing across several items (e.g. create booking + decrement doctor's daily capacity + add to patient's history).
+- In this project: `UpdateNote` uses `attribute_exists(PK)` (only update if it exists), the same mechanism.
+- **Interview line:** "I avoid check-then-act races by pushing the check into the write: a DynamoDB conditional write, or a transaction. The loser gets a 409."

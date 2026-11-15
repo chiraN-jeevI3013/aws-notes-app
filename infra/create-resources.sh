@@ -49,9 +49,34 @@ step_photos_bucket() {
   echo "CORS origins:"; aws s3api get-bucket-cors --bucket "$PHOTO_BUCKET" --query 'CORSRules[0].AllowedOrigins' --output text
 }
 
+# ---- 5.2 IAM role for the Lambda ----
+# The policy file uses placeholders so the public repo has no account ID. This fills them in.
+render_policy() {
+  sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/PHOTO_BUCKET/$PHOTO_BUCKET/g" \
+    "$(dirname "$0")/iam/lambda-permissions.json"
+}
+
+step_role() {
+  say "IAM role $ROLE_NAME"
+  if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+    aws iam create-role --role-name "$ROLE_NAME" \
+      --assume-role-policy-document "file://$(dirname "$0")/iam/lambda-trust.json" \
+      --tags "$TAGS_KV" --query 'Role.Arn' --output text
+  fi
+  aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name notes-app-access \
+    --policy-document "$(render_policy)"
+  echo "trusted service:"; aws iam get-role --role-name "$ROLE_NAME" \
+    --query 'Role.AssumeRolePolicyDocument.Statement[0].Principal.Service' --output text
+  echo "inline policies:"; aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames' --output text
+  echo "managed policies (should be empty):"; aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
+    --query 'AttachedPolicies[].PolicyName' --output text
+}
+
 case "${1:-}" in
   table)         step_table ;;
   photos-bucket) step_photos_bucket ;;
-  all)           step_table; step_photos_bucket ;;
-  *) echo "usage: $0 table|photos-bucket|all"; exit 1 ;;
+  role)          step_role ;;
+  print-policy)  render_policy ;;
+  all)           step_table; step_photos_bucket; step_role ;;
+  *) echo "usage: $0 table|photos-bucket|role|print-policy|all"; exit 1 ;;
 esac

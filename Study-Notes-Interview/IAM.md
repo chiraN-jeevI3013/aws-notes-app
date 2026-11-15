@@ -73,3 +73,20 @@
 - **Fix:** `env | grep AWS_` → `unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN` (or open a new terminal tab). `infra/config.sh` now refuses to run with fake creds.
 - **Debug first move:** `aws sts get-caller-identity` = "who am I right now?"
 - **Interview line:** "Env vars override profiles. In code, never hard-code keys; let the SDK's default chain find the role."
+
+## Phase 5.2: the Lambda's execution role (built in the console)
+- **Role** = an identity with no password/keys. Whoever *assumes* it gets temporary creds. Our Lambda runs as `notes-app-lambda-role`.
+- **Trust policy** = WHO may assume it → `"Principal": {"Service": "lambda.amazonaws.com"}` (`infra/iam/lambda-trust.json`).
+- **Permissions policy** = WHAT it can do → inline policy `notes-app-access` (`infra/iam/lambda-permissions.json`):
+  | Sid | Actions | Resource |
+  |---|---|---|
+  | NotesTable | Get/Put/Update/DeleteItem, Query (no Scan!) | `table/notes-app` only |
+  | PhotoObjects | Put/Get/DeleteObject | `notes-app-photos-cj/notes/*` only |
+  | PhotoBucketList | ListBucket | the bucket (so missing keys → 404, not 403) |
+  | OwnLogs | CreateLogGroup/Stream, PutLogEvents | `/aws/lambda/notes-app-api` only |
+- **Why no managed policy?** `AmazonDynamoDBFullAccess` = every table, every action (incl. DeleteTable). Inline + exact ARNs = blast radius of one table.
+- **Inline vs managed:** inline lives inside one role (deleted with it); managed is reusable across roles (AWS-managed or customer-managed).
+- **Console "Access level: Limited"** = only some actions of that service → good sign. "Full access" in a review = red flag.
+- **Default deny:** anything not allowed (474 other services) is denied. An explicit `Deny` beats any `Allow` (that's how SCPs like `RegionFloor` work).
+- **Public repo trick:** policy JSON has `ACCOUNT_ID`/`PHOTO_BUCKET` placeholders; `infra/create-resources.sh print-policy` fills them via `sts get-caller-identity`.
+- **Interview line:** "Each function gets its own execution role, trusted only by lambda.amazonaws.com, with an inline policy scoped to exact table and prefix ARNs. No long-lived keys anywhere: the SDK picks up the role's temporary creds automatically."
