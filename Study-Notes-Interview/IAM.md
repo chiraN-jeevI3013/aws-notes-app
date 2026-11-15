@@ -63,3 +63,13 @@
 - "Humans get SSO or users. Workloads get roles with temporary credentials."
 - "Least privilege: grant only the actions and resources a job needs."
 - "CloudTrail answers the question 'who did what, and when.'"
+
+## Credential provider chain (bug I hit in Phase 5)
+- AWS CLIs and SDKs look for credentials **in order**, and the **first match wins**:
+  1. Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+  2. Shared config/credentials files (`~/.aws/`), including the `aws login` / SSO cache
+  3. Container or instance role (ECS task role, EC2 instance profile), or Lambda's execution role (injected as env vars)
+- **What happened:** I had `export AWS_ACCESS_KEY_ID=test ...` left over from LocalStack testing. After `aws login`, the CLI still used the env vars → **`InvalidClientTokenId`** from real AWS.
+- **Fix:** `env | grep AWS_` → `unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN` (or open a new terminal tab). `infra/config.sh` now refuses to run with fake creds.
+- **Debug first move:** `aws sts get-caller-identity` = "who am I right now?"
+- **Interview line:** "Env vars override profiles. In code, never hard-code keys; let the SDK's default chain find the role."

@@ -5,6 +5,7 @@
 - **Sort key (SK):** orders items within a partition. It enables range queries such as `begins_with`, `between`, and `>`.
 - **Query vs Scan:** `Query` reads one partition by key (cheap and fast). `Scan` reads the whole table (expensive). Design keys so you only need Query.
 - **On-demand vs provisioned:** On-demand bills per request with no capacity planning, which is great for spiky or low traffic. Provisioned is cheaper at steady, predictable load.
+- **Table class: Standard vs Standard-IA (Infrequent Access):** Standard-IA has ~60% cheaper **storage** per GB but ~25% pricier **reads/writes**. It pays off only for big tables that are rarely read (old logs, archives). Small, actively used tables (ours) → **Standard**. Switching later is allowed.
 - **Writes are upserts:** `PutItem` overwrites an existing item. Use `ConditionExpression` to enforce "must exist" or "must not exist."
 
 ## In this project
