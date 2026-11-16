@@ -84,12 +84,25 @@ step_api() {
   echo "API_URL=$(aws apigatewayv2 get-api --api-id "$API_ID" --query ApiEndpoint --output text)"
 }
 
+# ---- 5.5 Public S3 website bucket for the frontend (created in the console; this step verifies) ----
+step_web_bucket() {
+  say "S3 website bucket $WEB_BUCKET"
+  aws s3api head-bucket --bucket "$WEB_BUCKET" >/dev/null 2>&1 || { echo "not found: create it in the console"; exit 1; }
+  echo "website index: $(aws s3api get-bucket-website --bucket "$WEB_BUCKET" --query 'IndexDocument.Suffix' --output text)"
+  echo "public access block:"; aws s3api get-public-access-block --bucket "$WEB_BUCKET" \
+    --query 'PublicAccessBlockConfiguration' --output table 2>/dev/null || echo "  none (all off)"
+  echo "policy: $(aws s3api get-bucket-policy --bucket "$WEB_BUCKET" --query Policy --output text)"
+  echo "files:"; aws s3 ls "s3://$WEB_BUCKET/"
+  echo "HTTP status of $WEB_ORIGIN: $(curl -s -o /dev/null -w '%{http_code}' "$WEB_ORIGIN")"
+}
+
 case "${1:-}" in
   table)         step_table ;;
   photos-bucket) step_photos_bucket ;;
   role)          step_role ;;
   print-policy)  render_policy ;;
   api)           step_api ;;
+  web-bucket)    step_web_bucket ;;
   all)           step_table; step_photos_bucket; step_role ;;
-  *) echo "usage: $0 table|photos-bucket|role|print-policy|api|all"; exit 1 ;;
+  *) echo "usage: $0 table|photos-bucket|role|print-policy|api|web-bucket|all"; exit 1 ;;
 esac

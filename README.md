@@ -1,6 +1,6 @@
 # Notes App: Go + AWS (DynamoDB, S3, Lambda)
 
-A small notes app built to get hands-on with cloud backend engineering: a **Go REST API** with **DynamoDB** for data and **S3** for photos, uploaded directly from the browser with **presigned URLs**. It runs fully locally in **Docker**, and the same code is being deployed to **AWS Lambda + API Gateway**.
+A small notes app built to get hands-on with cloud backend engineering: a **Go REST API** with **DynamoDB** for data and **S3** for photos, uploaded directly from the browser with **presigned URLs**. It runs fully locally in **Docker**, and the same code is **deployed on AWS**: Lambda + API Gateway for the API, an S3 static website for the frontend.
 
 Create folders, write notes inside them, and attach photos to each note.
 
@@ -22,6 +22,23 @@ flowchart LR
 4. The browser confirms (`POST .../photos`). The API checks the object exists, then saves its key on the note.
 5. Listing notes returns short-lived **presigned GET URLs** for the thumbnails. The bucket stays private.
 
+### Deployed on AWS (us-east-2)
+
+```mermaid
+flowchart LR
+    B[Browser] -->|HTTP GET index.html| WEB[(S3 static website<br/>notes-app-web-cj<br/>public read)]
+    B -->|HTTPS fetch JSON| APIGW[API Gateway<br/>HTTP API, $default route<br/>throttle 20 burst / 10 rps]
+    APIGW -->|event JSON, payload v2| L[Lambda notes-app-api<br/>Go, provided.al2023, arm64<br/>adapter → same chi router]
+    L -->|execution role, least privilege| DDB[(DynamoDB<br/>notes-app)]
+    L -->|presign / HeadObject / Delete| S3[(S3 notes-app-photos-cj<br/>private, CORS)]
+    B -->|PUT / GET presigned URL| S3
+    L -->|stdout JSON logs| CW[CloudWatch Logs<br/>1-week retention]
+```
+- **Two entry points, one codebase:** `cmd/server` (ListenAndServe: local/Docker) and `cmd/lambda` (API Gateway event → `http.Request` via `aws-lambda-go-api-proxy`). Both call `internal/app.NewHandler`, so routing, handlers and data code are identical everywhere.
+- **IAM:** the Lambda's execution role allows only the needed DynamoDB actions on one table, S3 actions on `notes/*`, and its own log group. A resource-based policy lets only this API (`aws:SourceArn`) invoke the function.
+- **CORS:** handled once, in Go middleware. API Gateway passes `OPTIONS` through; the photo bucket has its own CORS rule.
+- Resources were created in the AWS Console (for learning). `infra/create-resources.sh <step>` verifies each one; policies live in `infra/iam/`.
+
 ## Tech stack
 | Layer | Tech |
 |---|---|
@@ -31,7 +48,8 @@ flowchart LR
 | Frontend | One static `index.html`, vanilla JS, no build step, light/dark |
 | Local dev | Docker Compose: API + DynamoDB Local + LocalStack (S3) |
 | Container | Multi-stage build → distroless, non-root, ~23 MB |
-| Cloud (in progress) | Lambda (arm64), API Gateway HTTP API, IAM least privilege, CodePipeline/CodeBuild, CloudWatch |
+| Cloud | Lambda (Go, arm64), API Gateway HTTP API, S3 static website, IAM least privilege, CloudWatch Logs |
+| Next | CodePipeline/CodeBuild (CI/CD), CloudWatch alarms + Logs Insights |
 
 ## Data model (single table `notes-app`)
 | Item | PK | SK | Attributes |
@@ -79,13 +97,15 @@ DYNAMODB_ENDPOINT=http://localhost:8000 S3_ENDPOINT=http://localhost:4566 go run
 
 ## Project structure
 ```
-cmd/server/          local HTTP server entrypoint
+cmd/server/          entry point 1: HTTP server (local, Docker)
+cmd/lambda/          entry point 2: AWS Lambda (API Gateway v2 events)
+internal/app/        shared wiring: config, AWS clients, router
 internal/api/        router, handlers, middleware (request logging, CORS)
 internal/store/      DynamoDB access (single-table)
 internal/photos/     S3 presigned URLs, existence check, batch delete
 web/index.html       the whole frontend
-infra/               setup scripts (LocalStack init; AWS scripts + IAM policies coming)
-scripts/             end-to-end test scripts
+infra/               create-resources.sh (verify/create AWS resources), iam/ policies, LocalStack init
+scripts/             smoke/photo tests (BASE_URL=local or API Gateway), build-lambda.sh
 Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, REST...)
 ```
 
@@ -100,7 +120,8 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 ## Known gaps (deliberate, for now)
 - **No auth:** a single demo user. Next step: Cognito, or a JWT authorizer on API Gateway.
 - **No pagination:** would use `LastEvaluatedKey`.
-- **No rate limiting:** would use API Gateway throttling.
+- **Frontend over HTTP:** the S3 website endpoint has no HTTPS. Next: CloudFront + private bucket (OAC).
+- **Text needs Save, photos save on upload:** would autosave text with a debounce.
 - **Orphaned uploads** (uploaded but never confirmed): would add an S3 lifecycle rule or a sweeper job.
 
 ## Roadmap
@@ -108,7 +129,7 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 - [x] Photos via presigned S3 URLs
 - [x] Docker (multi-stage, distroless, compose)
 - [x] Frontend
-- [ ] Deploy: Lambda + API Gateway + S3 static site, least-privilege IAM
+- [x] Deploy: Lambda + API Gateway + S3 static site, least-privilege IAM
 - [ ] CI/CD: GitHub → CodePipeline → CodeBuild
 - [ ] Observability: CloudWatch Logs Insights, 5xx alarm
 - [ ] Stretch: Kubernetes (kind) manifests with probes, ECS Fargate

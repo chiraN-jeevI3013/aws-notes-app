@@ -75,6 +75,27 @@ flowchart LR
     end
 ```
 
+## 5. Phase 5: live on AWS
+```mermaid
+flowchart LR
+    B[Browser] -->|1 HTTP: index.html| WEB[(S3 website bucket<br/>notes-app-web-cj, public)]
+    B -->|2 HTTPS fetch| APIGW[API Gateway HTTP API<br/>$default route, throttling]
+    APIGW -->|3 event JSON| L[Lambda notes-app-api<br/>cmd/lambda → adapter → chi]
+    L -->|4 role creds| DDB[(DynamoDB notes-app)]
+    L -->|presign| S3[(S3 notes-app-photos-cj<br/>private)]
+    B -->|5 PUT/GET presigned| S3
+    L -.->|logs| CW[CloudWatch Logs]
+```
+| Local (Phase 3–4) | AWS (Phase 5) |
+|---|---|
+| `python -m http.server :5500` | S3 static website (HTTP) |
+| browser → Go on `:8080` | browser → API Gateway (HTTPS :443) → Lambda |
+| `cmd/server` (ListenAndServe) | `cmd/lambda` (lambda.Start + httpadapter) |
+| DynamoDB Local / LocalStack | real DynamoDB table / S3 bucket |
+| fake `test/test` creds | execution role `notes-app-lambda-role` |
+| `docker compose logs` | CloudWatch Logs `/aws/lambda/notes-app-api` |
+- **Who checks permission at each hop:** API Gateway → Lambda = resource-based policy (only our API). Lambda → DynamoDB/S3 = execution role. Browser → API = CORS (Go middleware). Browser → photo bucket = bucket CORS + presigned signature. Browser → website = bucket policy (public GetObject).
+
 ## Phase log
 | Phase | What changed in the flow |
 |-------|--------------------------|
@@ -82,3 +103,4 @@ flowchart LR
 | 2 Photos | + LocalStack (S3) on 4566. The API only *signs* URLs; photo bytes go browser ↔ S3 directly |
 | 3 Docker | The API runs as a 3rd container. Containers talk by service name; the Mac uses published ports |
 | 4 Frontend | `web/index.html` served on `:5500` calls the API `:8080` (CORS: Go middleware) and S3 `:4566` (CORS: bucket rule) |
+| 5 Deploy | Frontend on an S3 website, API Gateway → Lambda (same chi router via adapter) → real DynamoDB + S3; least-privilege role; smoke 13/13 + photo 9/9 on AWS; browser end-to-end verified |

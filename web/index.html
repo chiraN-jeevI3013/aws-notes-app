@@ -67,7 +67,10 @@
 
 <script>
 // The only line that changes between local and AWS (Phase 5: API Gateway URL).
-const API_URL = "http://localhost:8080";
+// Local page (python http.server on :5500) → local Go API; anywhere else (S3 website) → API Gateway.
+const API_URL = location.hostname === "localhost"
+  ? "http://localhost:8080"
+  : "https://y17g32ddfb.execute-api.us-east-2.amazonaws.com";
 
 let folders = [];
 let currentFolderId = null;

@@ -80,3 +80,17 @@ After `docker compose up -d` (recreates only the api container) with `example.co
 - "CORS is a browser mechanism. The server declares which origins may read its responses, and the browser enforces it."
 - "A preflight is an automatic OPTIONS request the browser sends before non-simple cross-origin requests."
 - "`*` is fine for a public, no-cookie API. In prod I'd pin the exact frontend origin."
+
+## On AWS (Phase 5.6): what I saw in DevTools
+- **Safari hides preflights**; Chrome lists them as Type **preflight**. Use Chrome for CORS debugging.
+- **Which requests get a preflight?** Anything not "simple". Simple = GET/HEAD/POST with only basic headers (Content-Type limited to form/text types).
+  | Request | Preflight? | Why |
+  |---|---|---|
+  | `GET /folders` | no | GET, no custom headers |
+  | `POST /folders` | yes | `Content-Type: application/json` isn't simple |
+  | `PUT .../notes/<id>` (save) | yes | PUT is never simple (+ JSON) |
+  | `DELETE ...` | yes | DELETE is never simple |
+- Preflights are **cached per URL**, so each note's first save gets its own preflight (named after the note ID). Without `Access-Control-Max-Age`, Chrome caches ~5 s. Prod: set e.g. `Max-Age: 600` to save a round trip (~100 ms here) per call.
+- The photo PUT's preflight is answered by **S3's bucket CORS**, not our API (two separate CORS configs: API middleware + bucket).
+- Clearing the Network tab only clears DevTools' log. Refresh → `GET /notes` (DynamoDB) → fresh presigned URLs → `<img>` loads from S3. The data persists on AWS, not in the browser.
+- Tip: tick **Keep log / Preserve log** to keep requests across reloads.
