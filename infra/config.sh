@@ -26,5 +26,7 @@ WEB_ORIGIN="http://$WEB_BUCKET.s3-website.$REGION.amazonaws.com"   # S3 static w
 ROLE_NAME="notes-app-lambda-role"
 FUNCTION_NAME="notes-app-api"
 API_NAME="notes-app-http-api"
+PIPELINE_NAME="notes-app-pipeline"
+BUILD_PROJECT="notes-app-build"
 
 say() { printf '\n==> %s\n' "$*"; }

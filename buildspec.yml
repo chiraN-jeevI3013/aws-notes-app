@@ -1,0 +1,44 @@
+# CodeBuild instructions. CodePipeline checks out the repo and runs these phases in order.
+# Any failing command stops the build, so nothing is deployed unless tests pass.
+version: 0.2
+
+env:
+  variables:
+    GO_VERSION: "1.27.4"
+    FUNCTION_NAME: "notes-app-api"
+    WEB_BUCKET: "notes-app-web-cj"
+    # API_URL is set on the CodeBuild project (used for the post-deploy smoke test).
+
+phases:
+  install:
+    commands:
+      # Pin the exact Go version from go.mod (build images ship older Go).
+      - ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+      - curl -sSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
+      - export PATH=/usr/local/go/bin:$PATH && go version
+
+  pre_build:
+    commands:
+      - export PATH=/usr/local/go/bin:$PATH
+      - go vet ./...
+      - go test ./...            # unit tests: routing, CORS, validation (no AWS needed)
+
+  build:
+    commands:
+      - export PATH=/usr/local/go/bin:$PATH
+      - scripts/build-lambda.sh  # → dist/notes-app-api.zip (linux/arm64 "bootstrap")
+
+  post_build:
+    commands:
+      # Stop here if the build failed (post_build runs even after a failed build phase).
+      - '[ "$CODEBUILD_BUILD_SUCCEEDING" = "1" ] || exit 1'
+      # 1) Backend: upload the new zip, wait until Lambda finishes switching to it.
+      - aws lambda update-function-code --function-name "$FUNCTION_NAME" --zip-file fileb://dist/notes-app-api.zip --query LastUpdateStatus --output text
+      - aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+      # 2) Frontend: stamp the git commit into the page, upload, and tell browsers not to cache stale HTML.
+      - SHA=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)
+      - sed -i "s/content=\"dev\"/content=\"$SHA\"/" web/index.html
+      - aws s3 cp web/index.html "s3://$WEB_BUCKET/index.html" --content-type text/html --cache-control no-cache
+      # 3) Verify the live deployment end to end.
+      - BASE_URL="$API_URL" scripts/smoke.sh
+      - echo "Deployed commit $SHA"

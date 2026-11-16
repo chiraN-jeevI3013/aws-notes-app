@@ -51,9 +51,9 @@ step_photos_bucket() {
 
 # ---- 5.2 IAM role for the Lambda ----
 # The policy file uses placeholders so the public repo has no account ID. This fills them in.
-render_policy() {
-  sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/PHOTO_BUCKET/$PHOTO_BUCKET/g" \
-    "$(dirname "$0")/iam/lambda-permissions.json"
+render_policy() {   # $1 = policy file name in infra/iam (default: the Lambda's permissions)
+  sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/PHOTO_BUCKET/$PHOTO_BUCKET/g" -e "s/WEB_BUCKET/$WEB_BUCKET/g" \
+    "$(dirname "$0")/iam/${1:-lambda-permissions.json}"
 }
 
 step_role() {
@@ -96,13 +96,23 @@ step_web_bucket() {
   echo "HTTP status of $WEB_ORIGIN: $(curl -s -o /dev/null -w '%{http_code}' "$WEB_ORIGIN")"
 }
 
+# ---- 6 CI/CD (created in the console; this step verifies) ----
+step_pipeline() {
+  say "CodePipeline $PIPELINE_NAME"
+  aws codeconnections list-connections --query 'Connections[].[ConnectionName,ConnectionStatus]' --output text | sed 's/^/connection: /'
+  aws codepipeline get-pipeline-state --name "$PIPELINE_NAME" \
+    --query 'stageStates[].[stageName,latestExecution.status]' --output text | sed 's/^/stage: /'
+  echo "live page version: $(curl -s "$WEB_ORIGIN" | grep -o 'name="version" content="[^"]*"')"
+}
+
 case "${1:-}" in
   table)         step_table ;;
   photos-bucket) step_photos_bucket ;;
   role)          step_role ;;
-  print-policy)  render_policy ;;
+  print-policy)  render_policy "${2:-}" ;;   # e.g. print-policy codebuild-deploy.json
   api)           step_api ;;
   web-bucket)    step_web_bucket ;;
+  pipeline)      step_pipeline ;;
   all)           step_table; step_photos_bucket; step_role ;;
-  *) echo "usage: $0 table|photos-bucket|role|print-policy|api|web-bucket|all"; exit 1 ;;
+  *) echo "usage: $0 table|photos-bucket|role|print-policy|api|web-bucket|pipeline|all"; exit 1 ;;
 esac
