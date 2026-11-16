@@ -50,7 +50,7 @@ flowchart LR
 | Container | Multi-stage build → distroless, non-root, ~23 MB |
 | Cloud | Lambda (Go, arm64), API Gateway HTTP API, S3 static website, IAM least privilege, CloudWatch Logs |
 | CI/CD | CodePipeline V2 (GitHub App trigger on push to main) → CodeBuild (`buildspec.yml`) |
-| Next | CloudWatch alarms + Logs Insights |
+| Observability | JSON logs with Lambda request ID, Logs Insights, metric filter `Api5xx` → CloudWatch alarm → SNS email |
 
 ## Data model (single table `notes-app`)
 | Item | PK | SK | Attributes |
@@ -121,6 +121,12 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 ## CI/CD
 `git push` to `main` → CodePipeline (GitHub App connection, notes-only pushes skipped) → CodeBuild runs [`buildspec.yml`](buildspec.yml): `go vet` + unit tests → build the arm64 zip → update the Lambda → stamp the commit SHA into `index.html` and upload it → `smoke.sh` against the live API. The build role may only update this one function and this one file ([policy](infra/iam/codebuild-deploy.json)).
 
+## Observability
+- Every log line is JSON with the **route pattern** (never raw IDs: low cardinality) and **Lambda's request ID**, which is also returned as `X-Request-Id`, so a bug report maps straight to that request's logs.
+- **Logs Insights** for per-route counts/latency and error drill-down.
+- **Metric filter** `{ $.status >= 500 }` → custom metric `NotesApp/Api5xx` → **alarm** (Sum ≥ 1 per minute, missing data = OK) → **SNS email** with a runbook.
+- Verified with a game day: a broken config produced 500s, the alarm emailed within ~1 minute, the root cause was found via request ID, and it recovered after the fix.
+
 ## Known gaps (deliberate, for now)
 - **No auth:** a single demo user. Next step: Cognito, or a JWT authorizer on API Gateway.
 - **No pagination:** would use `LastEvaluatedKey`.
@@ -135,5 +141,5 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 - [x] Frontend
 - [x] Deploy: Lambda + API Gateway + S3 static site, least-privilege IAM
 - [x] CI/CD: GitHub → CodePipeline → CodeBuild (vet, test, build, deploy, live smoke test)
-- [ ] Observability: CloudWatch Logs Insights, 5xx alarm
+- [x] Observability: request-ID correlation, Logs Insights, log-derived 5xx metric + SNS email alarm, game day
 - [ ] Stretch: Kubernetes (kind) manifests with probes, ECS Fargate

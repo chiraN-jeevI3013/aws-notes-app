@@ -106,6 +106,16 @@ flowchart LR
     CB -->|smoke.sh| APIGW[API Gateway → live API]
 ```
 
+## 7. Phase 7: observability
+```mermaid
+flowchart LR
+    L[Lambda: JSON logs<br/>requestId = Lambda RequestId] -->|stdout| CWL[(CloudWatch Logs)]
+    CWL -->|Logs Insights queries| YOU[You: per-route stats, error drill-down]
+    CWL -->|metric filter status>=500| M[Metric NotesApp/Api5xx]
+    M -->|Sum >= 1 per minute| A[Alarm notes-api-5xx]
+    A -->|SNS topic notes-app-alerts| E[Email with runbook]
+```
+
 ## Phase log
 | Phase | What changed in the flow |
 |-------|--------------------------|
@@ -115,3 +125,4 @@ flowchart LR
 | 4 Frontend | `web/index.html` served on `:5500` calls the API `:8080` (CORS: Go middleware) and S3 `:4566` (CORS: bucket rule) |
 | 5 Deploy | Frontend on an S3 website, API Gateway → Lambda (same chi router via adapter) → real DynamoDB + S3; least-privilege role; smoke 13/13 + photo 9/9 on AWS; browser end-to-end verified |
 | 6 CI/CD | Push to main → CodePipeline → CodeBuild: tests, builds, deploys Lambda + index.html, smoke-tests production. Build role limited to one function + one file |
+| 7 Observability | One request ID per request (in logs + response header), route-pattern labels, Logs Insights, log-derived 5xx metric → alarm → SNS email; game day verified |

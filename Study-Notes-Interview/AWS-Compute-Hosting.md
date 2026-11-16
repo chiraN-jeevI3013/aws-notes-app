@@ -205,3 +205,15 @@ EventBridge schedule ──► Lambda (send reminders)
 - **Postgres/MySQL (RDS):** each connection is a long-lived TCP session that costs memory on the DB server, and there's a max (often a few hundred). 1000 Lambdas → 1000 connections → "too many connections" errors. Fix: **RDS Proxy** (pools and shares connections).
 - **DynamoDB is different:** every call is a short **HTTPS request** (no persistent connection), and it's built for massive parallelism. 1000 Lambdas → fine. That's why **Lambda + DynamoDB** is a classic pair (and why your startup's choice made sense).
 - The DB doesn't process requests strictly one by one. It handles many **in parallel**. Correctness when two requests touch the same data is handled by **conditional writes and transactions** (see DynamoDB.md → double booking).
+
+## Tags: why we tag everything (`project=notes-app`)
+Tags are key=value labels on resources. AWS ignores them; *you* use them to slice the account.
+| Use | Example |
+|---|---|
+| Cost tracking | Cost Explorer → group by tag `project` (activate it as a cost allocation tag in Billing) |
+| Find everything | Resource Groups → **Tag Editor** → `project=notes-app` lists tables, buckets, Lambdas, roles, alarms across services |
+| Safe teardown | scripts delete only resources carrying the project tag |
+| Access control (ABAC) | IAM: "may only modify resources tagged `team=payments`" |
+| Automation | "stop everything tagged `env=dev` at 7 p.m." |
+- Companies often **enforce** tags (org Tag Policies / SCPs reject untagged resources: `owner`, `env`, `cost-center`).
+- **Interview line:** "Every resource is tagged with project/env/owner so cost, ownership and cleanup are queryable, not tribal knowledge."

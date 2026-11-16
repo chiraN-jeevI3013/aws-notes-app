@@ -36,3 +36,47 @@ fields @timestamp, method, route, status, latencyMs
 - 400/404 rows = smoke.sh's intentional bad-input checks (client errors, not bugs). **Zero 5xx.**
 - **High-cardinality bug spotted:** CORS preflights (`OPTIONS` → 204) are answered before chi routes them, so the log fell back to the raw URL with real IDs (`/folders/3045330f-…/notes/a5b7b816-…`). Each ID became its own row. Group-by fields need a small, fixed set of values (route patterns), never unique IDs. Fix: log `route:"preflight"` / `"unmatched"` when there's no pattern.
 - **Interview line:** "I log JSON with the route *pattern*, not the raw path, so Logs Insights can aggregate latency and errors per endpoint without high-cardinality noise."
+
+## Metric filter: logs → number
+- `/aws/lambda/notes-app-api` → Metric filters → pattern **`{ $.status >= 500 }`** (`{}` = parse as JSON; START/END/REPORT lines aren't JSON → ignored).
+- Namespace `NotesApp`, metric `Api5xx`, value `1` per match, **default value `0`** (minutes with logs but no errors report 0).
+- **No dimensions:** each unique dimension value is a separately billed metric (~$0.30/month each). Never use IDs as dimensions (high cardinality). Default value and dimensions are mutually exclusive anyway.
+- A custom metric **doesn't exist until its first data point**: create the filter, then send traffic, then it appears (~45 s for me) under *Custom namespaces → NotesApp*.
+
+## Alarm settings explained (smoke-detector analogy: what it senses, how often, how much, what if silent)
+| Setting | Ours | Meaning |
+|---|---|---|
+| Data source | Metrics | watch a number (Logs = scheduled log query; Alarms = composite "A and B") |
+| Statistic | **Sum** | count errors per period. **Average is a trap:** values are 1 (error) and 0 (default per log line), so 1 error in 100 requests averages 0.01 and never reaches 1 |
+| Period | 1 minute | size of each time slice checked |
+| Threshold | Static, **≥ 1** | 1+ errors in a minute → ALARM. (Anomaly detection = AWS learns "normal", needs history) |
+| Datapoints to alarm | **1 of 1** | one bad minute triggers. "3 of 5" ignores one-off blips (less flapping) |
+| Missing data | **treat as good** | no traffic = no errors. As missing → grey "Insufficient data"; as bad → for heartbeats ("alert if the job stops reporting") |
+| Evaluation window | sliding (default) | last N minutes from now (vs fixed clock-aligned buckets) |
+| Warm-up | off | waits for first data before evaluating new metrics |
+- **States:** OK (green) / ALARM (red → notify) / Insufficient data (grey).
+- Preview graph: blue line = metric, red dashed line = threshold.
+- **Interview line:** "I alarm on the Sum of a 5xx count metric derived from structured logs, 1-minute periods, missing data treated as not breaching, and notify via SNS. For noisy systems I'd use M-of-N datapoints or alarm on error rate instead of count."
+- **Alarm description = runbook** sent in the notification email: what it means + first 3 steps (Logs Insights filter `level = "ERROR"`, check recent deploys/env vars, run smoke.sh). Markdown renders only in the console.
+
+## Game day (2026-11-16): break → alert → investigate → fix → recover
+1. **Break:** Lambda env `TABLE_NAME=notes-app-broken` (simulated bad config change). `/health` stayed 200 (it doesn't touch DynamoDB): a health check alone can lie.
+2. **Errors:** 5 × `GET /folders` → `HTTP/2 500`, each with an `x-request-id`.
+3. **Alert:** ~1 min later the alarm went OK → ALARM; email: "1 out of the last 1 datapoints [5.0 (06:39:00)] ≥ 1.0". `5.0` = Sum of 5 errors (Average would never have fired). The runbook description arrived in the email.
+4. **Investigate:** Logs Insights
+   ```
+   fields @timestamp, route, status, requestId, err
+   | filter level = "ERROR"
+   | sort @timestamp desc
+   ```
+   → 2 ERROR lines per request, same requestId: `internal error` + `err` (the **why**) and `request /folders 500` (the **what**).
+   One request's full story:
+   ```
+   fields @timestamp, @message
+   | filter @message like "43624e2e-d7f0-4edc-8a8b-5831be531843"
+   | sort @timestamp asc
+   ```
+   → START → internal error → request 500 → REPORT (6.38 ms) → END.
+5. **Surprise:** the error was **`AccessDeniedException`** (not `ResourceNotFoundException`): `notes-app-lambda-role … not authorized to perform dynamodb:Query on table/notes-app-broken`. **IAM is evaluated before the resource lookup**; our role only allows `table/notes-app`. Least privilege held: a misconfigured or hijacked env var still can't reach other tables. Lesson: read the actual error; AccessDenied can be a symptom of a *config* change, not an IAM change (runbook step 2: check deploys **and env vars**).
+6. **Fix + recover:** `TABLE_NAME=notes-app` → 200s → alarm back to OK.
+- **Interview story (STAR):** "I ran a game day: broke config on purpose, got paged by a CloudWatch alarm on a log-derived 5xx metric within a minute, used the request ID from the response header to pull that request's full log timeline in Logs Insights, found the root cause, fixed it, and watched the alarm clear. It also proved least privilege: the misconfigured function was denied access to any other table."
