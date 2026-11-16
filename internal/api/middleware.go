@@ -26,7 +26,12 @@ func logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		route := r.URL.Path
+		// Log the route PATTERN (/folders/{folderId}), never the raw path: raw paths contain IDs,
+		// and a group-by field must have a small fixed set of values (avoid high cardinality).
+		route := "unmatched" // 404s, incl. random paths from scanners
+		if r.Method == http.MethodOptions {
+			route = "preflight" // answered by CORS middleware before chi matches a route
+		}
 		if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
 			route = rc.RoutePattern()
 		}
