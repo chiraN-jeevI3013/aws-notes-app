@@ -72,11 +72,24 @@ step_role() {
     --query 'AttachedPolicies[].PolicyName' --output text
 }
 
+# ---- 5.4 API Gateway HTTP API (created in the console; this step only verifies) ----
+step_api() {
+  say "API Gateway HTTP API $API_NAME"
+  API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text)
+  [[ "$API_ID" == "None" ]] && { echo "not found: create it in the console"; exit 1; }
+  aws apigatewayv2 get-routes --api-id "$API_ID" --query 'Items[].RouteKey' --output text | sed 's/^/routes: /'
+  aws apigatewayv2 get-integrations --api-id "$API_ID" \
+    --query 'Items[].[IntegrationType,PayloadFormatVersion]' --output text | sed 's/^/integration: /'
+  echo "cors (should be empty, our middleware does CORS): $(aws apigatewayv2 get-api --api-id "$API_ID" --query 'CorsConfiguration' --output text)"
+  echo "API_URL=$(aws apigatewayv2 get-api --api-id "$API_ID" --query ApiEndpoint --output text)"
+}
+
 case "${1:-}" in
   table)         step_table ;;
   photos-bucket) step_photos_bucket ;;
   role)          step_role ;;
   print-policy)  render_policy ;;
+  api)           step_api ;;
   all)           step_table; step_photos_bucket; step_role ;;
-  *) echo "usage: $0 table|photos-bucket|role|print-policy|all"; exit 1 ;;
+  *) echo "usage: $0 table|photos-bucket|role|print-policy|api|all"; exit 1 ;;
 esac

@@ -90,3 +90,21 @@
 - **Default deny:** anything not allowed (474 other services) is denied. An explicit `Deny` beats any `Allow` (that's how SCPs like `RegionFloor` work).
 - **Public repo trick:** policy JSON has `ACCOUNT_ID`/`PHOTO_BUCKET` placeholders; `infra/create-resources.sh print-policy` fills them via `sts get-caller-identity`.
 - **Interview line:** "Each function gets its own execution role, trusted only by lambda.amazonaws.com, with an inline policy scoped to exact table and prefix ARNs. No long-lived keys anywhere: the SDK picks up the role's temporary creds automatically."
+
+## Identity-based vs resource-based policies (Phase 5.4)
+| | Identity-based | Resource-based |
+|---|---|---|
+| Attached to | a role/user | the resource (Lambda, S3 bucket, SQS queue…) |
+| Answers | what can **this identity** do? | **who** can access **this resource**? |
+| Ours | `notes-app-access` on `notes-app-lambda-role` (logs, DynamoDB, S3) | on `notes-app-api`: API Gateway may `lambda:InvokeFunction` |
+| Where (console) | Lambda → Configuration → Permissions → top ("Execution role") | same page, bottom ("Resource-based policy statements") |
+```
+Browser → API Gateway ─[resource policy: may APIGW invoke me?]→ Lambda ─[execution role: may I query?]→ DynamoDB
+```
+
+## Confused deputy
+- **Deputy** = a trusted service acting on someone else's behalf (API Gateway, S3, SNS…).
+- **Attack:** policy trusts the whole service (`Principal: apigateway.amazonaws.com`) → attacker's API Gateway in *their* account points at *your* Lambda ARN → allowed. The deputy uses your trust to serve the attacker.
+- **Fix:** add `Condition` `AWS:SourceArn` (and/or `AWS:SourceAccount`) → "only when acting for MY API `y17g32ddfb`".
+- The name describes the attack; the condition is the protection. Analogy: "let in anyone in a courier uniform" vs "only the courier for order #123 to this office".
+- **Interview line:** "When I grant a service principal access, I scope it with `aws:SourceArn`/`aws:SourceAccount` to prevent the confused deputy problem."

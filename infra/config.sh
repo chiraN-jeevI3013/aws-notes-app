@@ -25,5 +25,6 @@ WEB_BUCKET="${WEB_BUCKET:-notes-app-web-cj}"
 WEB_ORIGIN="http://$WEB_BUCKET.s3-website.$REGION.amazonaws.com"   # S3 static website URL (step 5.6)
 ROLE_NAME="notes-app-lambda-role"
 FUNCTION_NAME="notes-app-api"
+API_NAME="notes-app-http-api"
 
 say() { printf '\n==> %s\n' "$*"; }
