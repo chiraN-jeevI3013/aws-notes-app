@@ -68,6 +68,8 @@ git push (main) ──webhook──► Source (GitHub App → zip → artifact S
 - **Why AWS didn't add it automatically:** a buildspec is arbitrary shell; AWS can't know what it deploys. Auto-granting broad rights would make every build robot an admin (a compromised dependency could wreck the account). Default to nothing; the owner grants exactly what's needed.
 - Retry without a new push: pipeline → Build stage → **Retry** (same commit).
 
+4. **Docs-only push still triggered a run** (commit `6f4fcdd`): 3 files matched `Study-Notes-Interview/**`, but root `README.md` didn't match `**/*.md` (CodePipeline's `**/` seems to need at least one folder). The pipeline is skipped only if *every* changed file is excluded. Fix: add `*.md` → `Study-Notes-Interview/**,**/*.md,*.md`. Lesson: glob rules differ between tools, so test filters with a real push.
+
 ## Useful commands
 ```bash
 aws codebuild list-projects --output text                       # does the project exist?
