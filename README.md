@@ -49,7 +49,8 @@ flowchart LR
 | Local dev | Docker Compose: API + DynamoDB Local + LocalStack (S3) |
 | Container | Multi-stage build → distroless, non-root, ~23 MB |
 | Cloud | Lambda (Go, arm64), API Gateway HTTP API, S3 static website, IAM least privilege, CloudWatch Logs |
-| Next | CodePipeline/CodeBuild (CI/CD), CloudWatch alarms + Logs Insights |
+| CI/CD | CodePipeline V2 (GitHub App trigger on push to main) → CodeBuild (`buildspec.yml`) |
+| Next | CloudWatch alarms + Logs Insights |
 
 ## Data model (single table `notes-app`)
 | Item | PK | SK | Attributes |
@@ -117,6 +118,9 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 - **Least-privilege containers:** a distroless, non-root image with no shell.
 - **Explicit CORS origin** instead of `*`. The bucket has its own CORS rule for browser uploads.
 
+## CI/CD
+`git push` to `main` → CodePipeline (GitHub App connection, notes-only pushes skipped) → CodeBuild runs [`buildspec.yml`](buildspec.yml): `go vet` + unit tests → build the arm64 zip → update the Lambda → stamp the commit SHA into `index.html` and upload it → `smoke.sh` against the live API. The build role may only update this one function and this one file ([policy](infra/iam/codebuild-deploy.json)).
+
 ## Known gaps (deliberate, for now)
 - **No auth:** a single demo user. Next step: Cognito, or a JWT authorizer on API Gateway.
 - **No pagination:** would use `LastEvaluatedKey`.
@@ -130,6 +134,6 @@ Study-Notes-Interview/   my learning notes per topic (AWS, Docker, Go, CORS, RES
 - [x] Docker (multi-stage, distroless, compose)
 - [x] Frontend
 - [x] Deploy: Lambda + API Gateway + S3 static site, least-privilege IAM
-- [ ] CI/CD: GitHub → CodePipeline → CodeBuild
+- [x] CI/CD: GitHub → CodePipeline → CodeBuild (vet, test, build, deploy, live smoke test)
 - [ ] Observability: CloudWatch Logs Insights, 5xx alarm
 - [ ] Stretch: Kubernetes (kind) manifests with probes, ECS Fargate

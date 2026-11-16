@@ -96,6 +96,16 @@ flowchart LR
 | `docker compose logs` | CloudWatch Logs `/aws/lambda/notes-app-api` |
 - **Who checks permission at each hop:** API Gateway → Lambda = resource-based policy (only our API). Lambda → DynamoDB/S3 = execution role. Browser → API = CORS (Go middleware). Browser → photo bucket = bucket CORS + presigned signature. Browser → website = bucket policy (public GetObject).
 
+## 6. Phase 6: CI/CD
+```mermaid
+flowchart LR
+    DEV[git push main] -->|webhook| SRC[CodePipeline Source<br/>GitHub App connection]
+    SRC -->|source zip via artifact S3| CB[CodeBuild notes-app-build<br/>vet → test → build zip]
+    CB -->|UpdateFunctionCode| L[Lambda notes-app-api]
+    CB -->|PutObject index.html + SHA| WEB[(S3 website bucket)]
+    CB -->|smoke.sh| APIGW[API Gateway → live API]
+```
+
 ## Phase log
 | Phase | What changed in the flow |
 |-------|--------------------------|
@@ -104,3 +114,4 @@ flowchart LR
 | 3 Docker | The API runs as a 3rd container. Containers talk by service name; the Mac uses published ports |
 | 4 Frontend | `web/index.html` served on `:5500` calls the API `:8080` (CORS: Go middleware) and S3 `:4566` (CORS: bucket rule) |
 | 5 Deploy | Frontend on an S3 website, API Gateway → Lambda (same chi router via adapter) → real DynamoDB + S3; least-privilege role; smoke 13/13 + photo 9/9 on AWS; browser end-to-end verified |
+| 6 CI/CD | Push to main → CodePipeline → CodeBuild: tests, builds, deploys Lambda + index.html, smoke-tests production. Build role limited to one function + one file |

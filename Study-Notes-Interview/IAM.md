@@ -108,3 +108,22 @@ Browser → API Gateway ─[resource policy: may APIGW invoke me?]→ Lambda ─
 - **Fix:** add `Condition` `AWS:SourceArn` (and/or `AWS:SourceAccount`) → "only when acting for MY API `y17g32ddfb`".
 - The name describes the attack; the condition is the protection. Analogy: "let in anyone in a courier uniform" vs "only the courier for order #123 to this office".
 - **Interview line:** "When I grant a service principal access, I scope it with `aws:SourceArn`/`aws:SourceAccount` to prevent the confused deputy problem."
+
+## How to read an IAM AccessDenied error (Phase 6, real example)
+```
+User:     arn:aws:sts::<acct>:assumed-role/codebuild-notes-app-build-service-role/AWSCodeBuild-…   ← WHO
+is not authorized to perform: lambda:UpdateFunctionCode                                         ← WHAT action
+on resource: arn:aws:lambda:us-east-2:<acct>:function:notes-app-api                             ← ON WHAT
+because no identity-based policy allows the lambda:UpdateFunctionCode action                   ← WHY
+```
+- **WHO:** `assumed-role/<role-name>/<session>` = which role's badge was used. The session name hints at the caller (here a CodeBuild build).
+- **WHAT + ON WHAT:** exactly the Action and Resource ARN to put in the fix (least privilege writes itself).
+- **WHY** tells you *where* to fix it:
+  | Reason text | Meaning | Fix |
+  |---|---|---|
+  | "no identity-based policy allows" | missing Allow on the role (default deny) | add an Allow to that role |
+  | "explicit deny in an identity-based policy" | a Deny on the role | remove/narrow that Deny |
+  | "explicit deny in a service control policy" | org SCP (e.g. our `RegionFloor`) | can't fix in-account; use an allowed region/service |
+  | "no resource-based policy allows" | the resource's own policy (bucket/Lambda/KMS) doesn't allow you | update the resource policy |
+- Evaluation order to remember: **explicit Deny anywhere wins → otherwise need an Allow → otherwise default deny.**
+- A policy JSON file in the repo does nothing until it's **attached** to a role.
